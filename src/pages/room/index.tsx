@@ -1,5 +1,16 @@
-import { useRef, useLayoutEffect } from 'react'
+import { useRef, useLayoutEffect, useState } from 'react'
 import './index.css'
+
+type Member = {
+  id: string
+  name: string
+}
+
+type Message = {
+  author: string
+  message: string
+  isBotMessage?: boolean
+}
 
 export const Room = () => {
   const chatContainer = useRef<HTMLElement>(null)
@@ -7,7 +18,14 @@ export const Room = () => {
   const memberContainer = useRef<HTMLLIElement>(null)
   const displayFrame = useRef<HTMLDivElement>(null)
 
+  const displayName = sessionStorage.getItem('displayName') || ''
+  const [members, setMembers] = useState<Member[]>([])
+  const [message, setMessage] = useState('')
+  const [messages, setMessages] = useState<Message[]>([])
+
   useLayoutEffect(() => {
+    window.addEventListener('beforeunload', leaveChannel)
+
     messagesContainer.current!.scrollTop =
       messagesContainer.current!.scrollHeight
 
@@ -15,7 +33,17 @@ export const Room = () => {
     chatContainer.current!.style.display = 'block'
   }, [])
 
-  let userIdInDisplayFrame = null
+  useLayoutEffect(() => {
+    const lastMessage = document.querySelector(
+      '#messages .message__wrapper:last-child'
+    )
+
+    if (lastMessage) {
+      lastMessage.scrollIntoView()
+    }
+  }, [messages])
+
+  let userIdInDisplayFrame = ''
 
   const videoFrames = document.getElementsByClassName(
     'video__container'
@@ -40,7 +68,7 @@ export const Room = () => {
   }
 
   const hideDisplayFrame = () => {
-    userIdInDisplayFrame = null
+    userIdInDisplayFrame = ''
     displayFrame.current!.style.display = 'none'
 
     const child = displayFrame.current!.children[0]
@@ -57,16 +85,115 @@ export const Room = () => {
     frame.addEventListener('click', expandVideoFrame)
   }
 
+  const handleMemberJoined = async (memberId: string) => {
+    console.log('A new member has joined the room:', memberId)
+    const { name } = await rtmClient.getUserAttributesByKeys(memberId, ['name'])
+    setMembers((prev) => [...prev, { id: memberId, name }])
+    setMessages((prev) => [
+      ...prev,
+      {
+        author: '🤖',
+        isBotMessage: true,
+        message: `Welcome to the room ${name}! 👋`
+      }
+    ])
+  }
+
+  const addMember = async (memberId: string) => {
+    // const { name } = await rtmClient.getUserAttributesByKeys(memberId, ['name'])
+    // setMembers((prev) => [...prev, {id: memberId, name}])
+  }
+
+  const handleMemberLeft = async (memberId: string) => {
+    removeMember(memberId)
+  }
+
+  const removeMember = async (memberId: string) => {
+    const member = members.find((member) => member.id === memberId)
+    setMembers((current) => current.filter((member) => member.id !== memberId))
+
+    if (member) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          author: '🤖',
+          isBotMessage: true,
+          message: `${member.name} has left the room.`
+        }
+      ])
+    }
+  }
+
+  const getMembers = async () => {
+    const channelMembers = await channel.getMembers()
+    for (const member of channelMembers) {
+      addMember(member)
+    }
+  }
+
+  const handleChannelMessage = async (messageData: any, memberId: string) => {
+    console.log('A new message was received')
+    const data = JSON.parse(messageData.text)
+
+    if (data.type === 'chat') {
+      setMessages((prev) => [
+        ...prev,
+        { author: data.displayName, message: data.message }
+      ])
+    }
+
+    if (data.type === 'user_left') {
+      // fix: remove from members array
+      // document.getElementById(`user-container-${data.uid}`).remove()
+
+      if (userIdInDisplayFrame === `user-container-${data.uid}`) {
+        displayFrame.current!.style.display = 'none'
+        for (let i = 0; videoFrames.length > i; i++) {
+          videoFrames[i].style.height = '300px'
+          videoFrames[i].style.width = '300px'
+        }
+      }
+    }
+  }
+
+  const sendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    channel.sendMessage({
+      text: JSON.stringify({
+        type: 'chat',
+        message: message,
+        displayName: displayName
+      })
+    })
+    setMessages((prev) => [...prev, { author: displayName, message }])
+    setMessage('')
+  }
+
+  const leaveChannel = async () => {
+    await channel.leave()
+    await rtmClient.logout()
+  }
+
   return (
     <main className='container'>
       <div id='room__container'>
         <section id='members__container' ref={memberContainer}>
           <div id='members__header'>
             <p>Participants</p>
-            <strong id='members__count'>0</strong>
+            <strong id='members__count'>{members.length}</strong>
           </div>
 
-          <div id='member__list'></div>
+          <div id='member__list'>
+            {members.map((member) => (
+              <div
+                className='member__wrapper'
+                id={`member__${member.id}__wrapper`}
+              >
+                <span className='green__icon'></span>
+                <p className='member_name'>{member.name}</p>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section id='stream__container'>
@@ -125,13 +252,38 @@ export const Room = () => {
         </section>
 
         <section id='messages__container' ref={chatContainer}>
-          <div id='messages' ref={messagesContainer}></div>
+          <div id='messages' ref={messagesContainer}>
+            {messages.map((item) => (
+              <div className='message__wrapper'>
+                <div
+                  className={`message__body${item.isBotMessage ? '__bot' : ''}`}
+                >
+                  <strong
+                    className={`message__author${
+                      item.isBotMessage ? '__bot' : ''
+                    }`}
+                  >
+                    {item.author}
+                  </strong>
+                  <p
+                    className={`message__text${
+                      item.isBotMessage ? '__bot' : ''
+                    }`}
+                  >
+                    {item.message}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
 
-          <form id='message__form'>
+          <form id='message__form' onSubmit={sendMessage}>
             <input
               type='text'
               name='message'
               placeholder='Send a message....'
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
             />
           </form>
         </section>
