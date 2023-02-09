@@ -1,4 +1,9 @@
 import { useRef, useLayoutEffect, useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import AgoraRTM from 'agora-rtm-sdk'
+import AgoraRTC from 'agora-rtc-react'
+import { v4 as uuidV4 } from 'uuid'
+import { useDidMount } from '../../hooks/use-did-mount'
 import './index.css'
 
 type Member = {
@@ -12,16 +17,53 @@ type Message = {
   isBotMessage?: boolean
 }
 
+const APP_ID = import.meta.env.VITE_API_ID
+const token = null
+
 export const Room = () => {
+  const navigate = useNavigate()
+  const { roomId } = useParams()
+  if (!roomId) navigate('/')
+
+  const displayName = sessionStorage.getItem('displayName') || ''
+  if (!displayName) navigate('/')
+
+  const rtmClient = AgoraRTM.createInstance(APP_ID)
+  const channel = rtmClient.createChannel(roomId!)
+  const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' })
+
   const chatContainer = useRef<HTMLElement>(null)
   const messagesContainer = useRef<HTMLDivElement>(null)
   const memberContainer = useRef<HTMLLIElement>(null)
   const displayFrame = useRef<HTMLDivElement>(null)
 
-  const displayName = sessionStorage.getItem('displayName') || ''
   const [members, setMembers] = useState<Member[]>([])
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
+
+  useDidMount(async () => {
+    let uid = sessionStorage.getItem('uid')
+    if (!uid) {
+      uid = uuidV4()
+      sessionStorage.setItem('uid', uid)
+    }
+
+    await rtmClient.login({ uid })
+    await rtmClient.addOrUpdateLocalUserAttributes({ name: displayName })
+    await channel.join()
+
+    channel.on('MemberJoined', handleMemberJoined)
+    channel.on('MemberLeft', handleMemberLeft)
+    channel.on('ChannelMessage', handleChannelMessage)
+
+    getMembers()
+    addBotMessage(`Welcome to the room ${displayName}! 👋`)
+
+    await client.join(APP_ID, roomId!, token, uid)
+
+    // client.on('user-published', handleUserPublished)
+    // client.on('user-left', handleUserLeft)
+  })
 
   useLayoutEffect(() => {
     window.addEventListener('beforeunload', leaveChannel)
@@ -89,19 +131,23 @@ export const Room = () => {
     console.log('A new member has joined the room:', memberId)
     const { name } = await rtmClient.getUserAttributesByKeys(memberId, ['name'])
     setMembers((prev) => [...prev, { id: memberId, name }])
+    addBotMessage(`Welcome to the room ${name}! 👋`)
+  }
+
+  const addMember = async (memberId: string) => {
+    const { name } = await rtmClient.getUserAttributesByKeys(memberId, ['name'])
+    setMembers((prev) => [...prev, { id: memberId, name }])
+  }
+
+  const addBotMessage = (message: string) => {
     setMessages((prev) => [
       ...prev,
       {
         author: '🤖',
         isBotMessage: true,
-        message: `Welcome to the room ${name}! 👋`
+        message
       }
     ])
-  }
-
-  const addMember = async (memberId: string) => {
-    // const { name } = await rtmClient.getUserAttributesByKeys(memberId, ['name'])
-    // setMembers((prev) => [...prev, {id: memberId, name}])
   }
 
   const handleMemberLeft = async (memberId: string) => {
@@ -113,14 +159,7 @@ export const Room = () => {
     setMembers((current) => current.filter((member) => member.id !== memberId))
 
     if (member) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          author: '🤖',
-          isBotMessage: true,
-          message: `${member.name} has left the room.`
-        }
-      ])
+      addBotMessage(`${member.name} has left the room.`)
     }
   }
 
@@ -131,7 +170,7 @@ export const Room = () => {
     }
   }
 
-  const handleChannelMessage = async (messageData: any, memberId: string) => {
+  const handleChannelMessage = async (messageData: any) => {
     console.log('A new message was received')
     const data = JSON.parse(messageData.text)
 
@@ -143,8 +182,7 @@ export const Room = () => {
     }
 
     if (data.type === 'user_left') {
-      // fix: remove from members array
-      // document.getElementById(`user-container-${data.uid}`).remove()
+      removeMember(data.uid)
 
       if (userIdInDisplayFrame === `user-container-${data.uid}`) {
         displayFrame.current!.style.display = 'none'
