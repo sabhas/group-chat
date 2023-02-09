@@ -1,4 +1,5 @@
 import { useRef, useLayoutEffect } from 'react'
+import './index.css'
 
 export const Room = () => {
   const chatContainer = useRef<HTMLElement>(null)
