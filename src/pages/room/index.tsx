@@ -73,7 +73,7 @@ export const Room = () => {
   const [hasJoinedStream, setHasJoinedStream] = useState(false)
   const [streamers, setStreamers] = useState<Streamer[]>([])
   const [userInDisplayFrame, setUserInDisplayFrame] = useState<UID>('')
-
+  const [isSharingScreen, setIsSharingScreen] = useState(false)
   const remoteUsers: { [key: UID]: IAgoraRTCRemoteUser } = {}
 
   useDidMount(async () => {
@@ -162,8 +162,7 @@ export const Room = () => {
   }
 
   const handleUserLeft = async (user: IAgoraRTCRemoteUser) => {
-    setStreamers((prev) => prev.filter((streamer) => streamer.uid === uid))
-    if (userInDisplayFrame === uid) setUserInDisplayFrame('')
+    removeStreamer(user.uid)
   }
 
   const handleMemberJoined = async (memberId: string) => {
@@ -171,6 +170,10 @@ export const Room = () => {
     const { name } = await rtmClient.getUserAttributesByKeys(memberId, ['name'])
     setMembers((prev) => [...prev, { id: memberId, name }])
     addBotMessage(`Welcome to the room ${name}! 👋`)
+  }
+
+  const handleMemberLeft = async (memberId: string) => {
+    removeMember(memberId)
   }
 
   const addMember = async (memberId: string) => {
@@ -196,10 +199,6 @@ export const Room = () => {
     ])
   }
 
-  const handleMemberLeft = async (memberId: string) => {
-    removeMember(memberId)
-  }
-
   const removeMember = async (memberId: string) => {
     const member = members.find((member) => member.id === memberId)
     setMembers((current) => current.filter((member) => member.id !== memberId))
@@ -207,6 +206,11 @@ export const Room = () => {
     if (member) {
       addBotMessage(`${member.name} has left the room.`)
     }
+  }
+
+  const removeStreamer = (uid: UID) => {
+    setStreamers((prev) => prev.filter((streamer) => streamer.uid === uid))
+    if (userInDisplayFrame === uid) setUserInDisplayFrame('')
   }
 
   const getMembers = async () => {
@@ -283,8 +287,6 @@ export const Room = () => {
 
     await client.unpublish([localTracks[0], localTracks[1]])
 
-    localScreenTracks = await AgoraRTC.createScreenVideoTrack({}, 'enable')
-
     if (localScreenTracks) {
       await client.unpublish(localScreenTracks)
     }
@@ -312,7 +314,7 @@ export const Room = () => {
     }
   }
 
-  let toggleCamera = async (
+  const toggleCamera = async (
     e: React.MouseEvent<HTMLButtonElement, MouseEvent>
   ) => {
     let button = e.currentTarget
@@ -323,6 +325,31 @@ export const Room = () => {
     } else {
       await localTracks[1].setMuted(true)
       button.classList.remove('active')
+    }
+  }
+
+  const toggleScreen = async (
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent>
+  ) => {
+    let screenButton = e.currentTarget
+
+    if (!isSharingScreen) {
+      setIsSharingScreen(true)
+
+      screenButton.classList.add('active')
+
+      setUserInDisplayFrame(uid)
+
+      localScreenTracks = await AgoraRTC.createScreenVideoTrack({}, 'enable')
+      localScreenTracks[0].play(`user-${uid}`)
+
+      await client.unpublish([localTracks[1]])
+      await client.publish(localScreenTracks)
+    } else {
+      setIsSharingScreen(false)
+      await client.unpublish(localScreenTracks)
+      localTracks[1].play(`user-${uid}`)
+      await client.publish([localTracks[1]])
     }
   }
 
@@ -394,7 +421,12 @@ export const Room = () => {
             className='stream__actions'
             style={{ display: hasJoinedStream ? 'flex' : 'none' }}
           >
-            <button id='camera-btn' className='active' onClick={toggleCamera}>
+            <button
+              id='camera-btn'
+              className={isSharingScreen ? '' : 'active'}
+              style={{ display: isSharingScreen ? 'none' : 'block' }}
+              onClick={toggleCamera}
+            >
               <svg
                 xmlns='http://www.w3.org/2000/svg'
                 width='24'
@@ -414,7 +446,7 @@ export const Room = () => {
                 <path d='M12 2c1.103 0 2 .897 2 2v7c0 1.103-.897 2-2 2s-2-.897-2-2v-7c0-1.103.897-2 2-2zm0-2c-2.209 0-4 1.791-4 4v7c0 2.209 1.791 4 4 4s4-1.791 4-4v-7c0-2.209-1.791-4-4-4zm8 9v2c0 4.418-3.582 8-8 8s-8-3.582-8-8v-2h2v2c0 3.309 2.691 6 6 6s6-2.691 6-6v-2h2zm-7 13v-2h-2v2h-4v2h10v-2h-4z' />
               </svg>
             </button>
-            <button id='screen-btn'>
+            <button id='screen-btn' onClick={toggleScreen}>
               <svg
                 xmlns='http://www.w3.org/2000/svg'
                 width='24'
