@@ -91,7 +91,7 @@ export const Room = () => {
     await client.join(APP_ID, roomId!, token, uid)
 
     client.on('user-published', handleUserPublished)
-    // client.on('user-left', handleUserLeft)
+    client.on('user-left', handleUserLeft)
   })
 
   useLayoutEffect(() => {
@@ -159,6 +159,11 @@ export const Room = () => {
     if (mediaType === 'audio') {
       user.audioTrack?.play()
     }
+  }
+
+  const handleUserLeft = async (user: IAgoraRTCRemoteUser) => {
+    setStreamers((prev) => prev.filter((streamer) => streamer.uid === uid))
+    if (userInDisplayFrame === uid) setUserInDisplayFrame('')
   }
 
   const handleMemberJoined = async (memberId: string) => {
