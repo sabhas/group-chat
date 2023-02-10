@@ -312,6 +312,20 @@ export const Room = () => {
     }
   }
 
+  let toggleCamera = async (
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent>
+  ) => {
+    let button = e.currentTarget
+
+    if (localTracks[1].muted) {
+      await localTracks[1].setMuted(false)
+      button.classList.add('active')
+    } else {
+      await localTracks[1].setMuted(true)
+      button.classList.remove('active')
+    }
+  }
+
   return (
     <main className='container'>
       <div id='room__container'>
@@ -380,7 +394,7 @@ export const Room = () => {
             className='stream__actions'
             style={{ display: hasJoinedStream ? 'flex' : 'none' }}
           >
-            <button id='camera-btn' className='active'>
+            <button id='camera-btn' className='active' onClick={toggleCamera}>
               <svg
                 xmlns='http://www.w3.org/2000/svg'
                 width='24'
