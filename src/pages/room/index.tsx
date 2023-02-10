@@ -2,10 +2,12 @@ import { useRef, useLayoutEffect, useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import AgoraRTM from 'agora-rtm-sdk'
 import AgoraRTC, {
+  IAgoraRTCRemoteUser,
   ICameraVideoTrack,
   ILocalAudioTrack,
   ILocalVideoTrack,
-  IMicrophoneAudioTrack
+  IMicrophoneAudioTrack,
+  UID
 } from 'agora-rtc-react'
 import { v4 as uuidV4 } from 'uuid'
 import { useDidMount } from '../../hooks/use-did-mount'
@@ -23,7 +25,7 @@ type Message = {
 }
 
 type Streamer = {
-  id: string
+  uid: UID
   height: string
   width: string
 }
@@ -70,7 +72,9 @@ export const Room = () => {
   const [messages, setMessages] = useState<Message[]>([])
   const [hasJoinedStream, setHasJoinedStream] = useState(false)
   const [streamers, setStreamers] = useState<Streamer[]>([])
-  const [userInDisplayFrame, setUserInDisplayFrame] = useState('')
+  const [userInDisplayFrame, setUserInDisplayFrame] = useState<UID>('')
+
+  const remoteUsers: { [key: UID]: IAgoraRTCRemoteUser } = {}
 
   useDidMount(async () => {
     await rtmClient.login({ uid })
@@ -86,7 +90,7 @@ export const Room = () => {
 
     await client.join(APP_ID, roomId!, token, uid)
 
-    // client.on('user-published', handleUserPublished)
+    client.on('user-published', handleUserPublished)
     // client.on('user-left', handleUserLeft)
   })
 
@@ -104,9 +108,9 @@ export const Room = () => {
     if (userInDisplayFrame) {
       setStreamers((prev) => {
         return prev.map((streamer) => {
-          if (streamer.id !== userInDisplayFrame)
+          if (streamer.uid !== userInDisplayFrame)
             return {
-              id: streamer.id,
+              uid: streamer.uid,
               ...STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
             }
 
@@ -116,9 +120,9 @@ export const Room = () => {
     } else {
       setStreamers((prev) => {
         return prev.map((streamer) => {
-          if (streamer.id !== userInDisplayFrame)
+          if (streamer.uid !== userInDisplayFrame)
             return {
-              id: streamer.id,
+              uid: streamer.uid,
               ...STREAM_HEIGHT_WIDTH
             }
 
@@ -138,6 +142,25 @@ export const Room = () => {
     }
   }, [messages])
 
+  const handleUserPublished = async (
+    user: IAgoraRTCRemoteUser,
+    mediaType: 'audio' | 'video'
+  ) => {
+    remoteUsers[user.uid] = user
+
+    await client.subscribe(user, mediaType)
+
+    addStreamer(user.uid)
+
+    if (mediaType === 'video') {
+      user.videoTrack?.play(`user-${user.uid}`)
+    }
+
+    if (mediaType === 'audio') {
+      user.audioTrack?.play()
+    }
+  }
+
   const handleMemberJoined = async (memberId: string) => {
     console.log('A new member has joined the room:', memberId)
     const { name } = await rtmClient.getUserAttributesByKeys(memberId, ['name'])
@@ -150,11 +173,11 @@ export const Room = () => {
     setMembers((prev) => [...prev, { id: memberId, name }])
   }
 
-  const addStreamer = (id: string) => {
+  const addStreamer = (uid: UID) => {
     const dimensions = userInDisplayFrame
       ? STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
       : STREAM_HEIGHT_WIDTH
-    setStreamers((prev) => [...prev, { id: uid, ...dimensions }])
+    setStreamers((prev) => [...prev, { uid, ...dimensions }])
   }
 
   const addBotMessage = (message: string) => {
@@ -300,15 +323,15 @@ export const Room = () => {
           >
             {streamers.map(
               (streamer) =>
-                streamer.id === userInDisplayFrame && (
+                streamer.uid === userInDisplayFrame && (
                   <div
                     className='video__container'
-                    id={`user-container-${streamer.id}`}
+                    id={`user-container-${streamer.uid}`}
                     style={{ height: streamer.height, width: streamer.width }}
                   >
                     <div
                       className='video-player'
-                      id={`user-${streamer.id}`}
+                      id={`user-${streamer.uid}`}
                     ></div>
                   </div>
                 )
@@ -318,16 +341,16 @@ export const Room = () => {
           <div id='streams__container'>
             {streamers.map(
               (streamer) =>
-                streamer.id !== userInDisplayFrame && (
+                streamer.uid !== userInDisplayFrame && (
                   <div
                     className='video__container'
-                    id={`user-container-${streamer.id}`}
+                    id={`user-container-${streamer.uid}`}
                     style={{ height: streamer.height, width: streamer.width }}
-                    onClick={() => setUserInDisplayFrame(streamer.id)}
+                    onClick={() => setUserInDisplayFrame(streamer.uid)}
                   >
                     <div
                       className='video-player'
-                      id={`user-${streamer.id}`}
+                      id={`user-${streamer.uid}`}
                     ></div>
                   </div>
                 )
