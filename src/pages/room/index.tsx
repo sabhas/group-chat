@@ -1,4 +1,4 @@
-import { useRef, useLayoutEffect, useState } from 'react'
+import { useRef, useLayoutEffect, useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import AgoraRTM from 'agora-rtm-sdk'
 import AgoraRTC, {
@@ -20,6 +20,21 @@ type Message = {
   author: string
   message: string
   isBotMessage?: boolean
+}
+
+type Streamer = {
+  id: string
+  height: string
+  width: string
+}
+
+const STREAM_HEIGHT_WIDTH = {
+  height: '300px',
+  width: '300px'
+}
+const STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME = {
+  height: '100px',
+  width: '100px'
 }
 
 const APP_ID = import.meta.env.VITE_API_ID
@@ -49,13 +64,13 @@ export const Room = () => {
   const chatContainer = useRef<HTMLElement>(null)
   const messagesContainer = useRef<HTMLDivElement>(null)
   const memberContainer = useRef<HTMLLIElement>(null)
-  const displayFrame = useRef<HTMLDivElement>(null)
 
   const [members, setMembers] = useState<Member[]>([])
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [hasJoinedStream, setHasJoinedStream] = useState(false)
-  const [streamers, setStreamers] = useState<Member[]>([])
+  const [streamers, setStreamers] = useState<Streamer[]>([])
+  const [userInDisplayFrame, setUserInDisplayFrame] = useState('')
 
   useDidMount(async () => {
     await rtmClient.login({ uid })
@@ -85,6 +100,34 @@ export const Room = () => {
     chatContainer.current!.style.display = 'block'
   }, [])
 
+  useEffect(() => {
+    if (userInDisplayFrame) {
+      setStreamers((prev) => {
+        return prev.map((streamer) => {
+          if (streamer.id !== userInDisplayFrame)
+            return {
+              id: streamer.id,
+              ...STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
+            }
+
+          return streamer
+        })
+      })
+    } else {
+      setStreamers((prev) => {
+        return prev.map((streamer) => {
+          if (streamer.id !== userInDisplayFrame)
+            return {
+              id: streamer.id,
+              ...STREAM_HEIGHT_WIDTH
+            }
+
+          return streamer
+        })
+      })
+    }
+  }, [userInDisplayFrame])
+
   useLayoutEffect(() => {
     const lastMessage = document.querySelector(
       '#messages .message__wrapper:last-child'
@@ -94,47 +137,6 @@ export const Room = () => {
       lastMessage.scrollIntoView()
     }
   }, [messages])
-
-  let userIdInDisplayFrame = ''
-
-  const videoFrames = document.getElementsByClassName(
-    'video__container'
-  ) as HTMLCollectionOf<HTMLElement>
-
-  // fix
-  const expandVideoFrame = (
-    e: React.MouseEvent<HTMLDivElement, MouseEvent>
-  ) => {
-    const child = displayFrame.current!.children[0]
-    const streamContainer = document.getElementById('streams_container')
-    if (streamContainer) streamContainer.appendChild(child)
-
-    displayFrame.current!.style.display = 'block'
-    const target = e.target as HTMLElement
-    displayFrame.current!.appendChild(target)
-    userIdInDisplayFrame = target.id
-
-    for (const frame of videoFrames) {
-      if (frame.id !== userIdInDisplayFrame) {
-        frame.style.height = '100px'
-        frame.style.width = '100px'
-      }
-    }
-  }
-
-  const hideDisplayFrame = () => {
-    userIdInDisplayFrame = ''
-    displayFrame.current!.style.display = 'none'
-
-    const child = displayFrame.current!.children[0]
-    const streamContainer = document.getElementById('streams_container')
-    if (streamContainer) streamContainer.appendChild(child)
-
-    for (const frame of videoFrames) {
-      frame.style.height = '300px'
-      frame.style.width = '300px'
-    }
-  }
 
   const handleMemberJoined = async (memberId: string) => {
     console.log('A new member has joined the room:', memberId)
@@ -146,6 +148,13 @@ export const Room = () => {
   const addMember = async (memberId: string) => {
     const { name } = await rtmClient.getUserAttributesByKeys(memberId, ['name'])
     setMembers((prev) => [...prev, { id: memberId, name }])
+  }
+
+  const addStreamer = (id: string) => {
+    const dimensions = userInDisplayFrame
+      ? STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
+      : STREAM_HEIGHT_WIDTH
+    setStreamers((prev) => [...prev, { id: uid, ...dimensions }])
   }
 
   const addBotMessage = (message: string) => {
@@ -193,13 +202,7 @@ export const Room = () => {
     if (data.type === 'user_left') {
       removeMember(data.uid)
 
-      if (userIdInDisplayFrame === `user-container-${data.uid}`) {
-        displayFrame.current!.style.display = 'none'
-        for (let i = 0; videoFrames.length > i; i++) {
-          videoFrames[i].style.height = '300px'
-          videoFrames[i].style.width = '300px'
-        }
-      }
+      if (userInDisplayFrame === data.uid) setUserInDisplayFrame('')
     }
   }
 
@@ -234,7 +237,7 @@ export const Room = () => {
       }
     )
 
-    setStreamers((prev) => [...prev, { name: displayName, id: uid }])
+    addStreamer(uid)
 
     localTracks[1].play(`user-${uid}`)
     await client.publish([localTracks[0], localTracks[1]])
@@ -260,14 +263,7 @@ export const Room = () => {
 
     removeMember(uid)
 
-    if (userIdInDisplayFrame === `user-container-${uid}`) {
-      displayFrame.current!.style.display = 'none'
-
-      for (const frame of videoFrames) {
-        frame.style.height = '300px'
-        frame.style.width = '300px'
-      }
-    }
+    if (userInDisplayFrame === uid) setUserInDisplayFrame('')
 
     channel.sendMessage({
       text: JSON.stringify({ type: 'user_left', uid: uid })
@@ -299,20 +295,43 @@ export const Room = () => {
         <section id='stream__container'>
           <div
             id='stream__box'
-            ref={displayFrame}
-            onClick={hideDisplayFrame}
-          ></div>
+            style={{ display: userInDisplayFrame ? 'block' : 'none' }}
+            onClick={() => setUserInDisplayFrame('')}
+          >
+            {streamers.map(
+              (streamer) =>
+                streamer.id === userInDisplayFrame && (
+                  <div
+                    className='video__container'
+                    id={`user-container-${streamer.id}`}
+                    style={{ height: streamer.height, width: streamer.width }}
+                  >
+                    <div
+                      className='video-player'
+                      id={`user-${streamer.id}`}
+                    ></div>
+                  </div>
+                )
+            )}
+          </div>
 
           <div id='streams__container'>
-            {streamers.map((streamer) => (
-              <div
-                className='video__container'
-                id={`user-container-${streamer.id}`}
-                onClick={expandVideoFrame}
-              >
-                <div className='video-player' id={`user-${streamer.id}`}></div>
-              </div>
-            ))}
+            {streamers.map(
+              (streamer) =>
+                streamer.id !== userInDisplayFrame && (
+                  <div
+                    className='video__container'
+                    id={`user-container-${streamer.id}`}
+                    style={{ height: streamer.height, width: streamer.width }}
+                    onClick={() => setUserInDisplayFrame(streamer.id)}
+                  >
+                    <div
+                      className='video-player'
+                      id={`user-${streamer.id}`}
+                    ></div>
+                  </div>
+                )
+            )}
           </div>
 
           <div
