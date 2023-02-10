@@ -1,7 +1,12 @@
 import { useRef, useLayoutEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import AgoraRTM from 'agora-rtm-sdk'
-import AgoraRTC from 'agora-rtc-react'
+import AgoraRTC, {
+  ICameraVideoTrack,
+  ILocalAudioTrack,
+  ILocalVideoTrack,
+  IMicrophoneAudioTrack
+} from 'agora-rtc-react'
 import { v4 as uuidV4 } from 'uuid'
 import { useDidMount } from '../../hooks/use-did-mount'
 import './index.css'
@@ -28,9 +33,18 @@ export const Room = () => {
   const displayName = sessionStorage.getItem('displayName') || ''
   if (!displayName) navigate('/')
 
+  let uid = sessionStorage.getItem('uid') || ''
+  if (!uid) {
+    uid = uuidV4()
+    sessionStorage.setItem('uid', uid)
+  }
+
   const rtmClient = AgoraRTM.createInstance(APP_ID)
   const channel = rtmClient.createChannel(roomId!)
   const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' })
+
+  let localTracks: [IMicrophoneAudioTrack, ICameraVideoTrack]
+  let localScreenTracks: [ILocalVideoTrack, ILocalAudioTrack]
 
   const chatContainer = useRef<HTMLElement>(null)
   const messagesContainer = useRef<HTMLDivElement>(null)
@@ -40,14 +54,10 @@ export const Room = () => {
   const [members, setMembers] = useState<Member[]>([])
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
+  const [hasJoinedStream, setHasJoinedStream] = useState(false)
+  const [streamers, setStreamers] = useState<Member[]>([])
 
   useDidMount(async () => {
-    let uid = sessionStorage.getItem('uid')
-    if (!uid) {
-      uid = uuidV4()
-      sessionStorage.setItem('uid', uid)
-    }
-
     await rtmClient.login({ uid })
     await rtmClient.addOrUpdateLocalUserAttributes({ name: displayName })
     await channel.join()
@@ -91,7 +101,10 @@ export const Room = () => {
     'video__container'
   ) as HTMLCollectionOf<HTMLElement>
 
-  const expandVideoFrame = (e: Event) => {
+  // fix
+  const expandVideoFrame = (
+    e: React.MouseEvent<HTMLDivElement, MouseEvent>
+  ) => {
     const child = displayFrame.current!.children[0]
     const streamContainer = document.getElementById('streams_container')
     if (streamContainer) streamContainer.appendChild(child)
@@ -121,10 +134,6 @@ export const Room = () => {
       frame.style.height = '300px'
       frame.style.width = '300px'
     }
-  }
-
-  for (const frame of videoFrames) {
-    frame.addEventListener('click', expandVideoFrame)
   }
 
   const handleMemberJoined = async (memberId: string) => {
@@ -212,6 +221,59 @@ export const Room = () => {
     await rtmClient.logout()
   }
 
+  const joinStream = async () => {
+    setHasJoinedStream(true)
+
+    const localTracks = await AgoraRTC.createMicrophoneAndCameraTracks(
+      {},
+      {
+        encoderConfig: {
+          width: { min: 640, ideal: 1920, max: 1920 },
+          height: { min: 480, ideal: 1080, max: 1080 }
+        }
+      }
+    )
+
+    setStreamers((prev) => [...prev, { name: displayName, id: uid }])
+
+    localTracks[1].play(`user-${uid}`)
+    await client.publish([localTracks[0], localTracks[1]])
+  }
+
+  const leaveStream = async (e: any) => {
+    e.preventDefault()
+
+    setHasJoinedStream(false)
+
+    for (const track of localTracks) {
+      track.stop()
+      track.close()
+    }
+
+    await client.unpublish([localTracks[0], localTracks[1]])
+
+    localScreenTracks = await AgoraRTC.createScreenVideoTrack({}, 'enable')
+
+    if (localScreenTracks) {
+      await client.unpublish(localScreenTracks)
+    }
+
+    removeMember(uid)
+
+    if (userIdInDisplayFrame === `user-container-${uid}`) {
+      displayFrame.current!.style.display = 'none'
+
+      for (const frame of videoFrames) {
+        frame.style.height = '300px'
+        frame.style.width = '300px'
+      }
+    }
+
+    channel.sendMessage({
+      text: JSON.stringify({ type: 'user_left', uid: uid })
+    })
+  }
+
   return (
     <main className='container'>
       <div id='room__container'>
@@ -241,9 +303,22 @@ export const Room = () => {
             onClick={hideDisplayFrame}
           ></div>
 
-          <div id='streams__container'></div>
+          <div id='streams__container'>
+            {streamers.map((streamer) => (
+              <div
+                className='video__container'
+                id={`user-container-${streamer.id}`}
+                onClick={expandVideoFrame}
+              >
+                <div className='video-player' id={`user-${streamer.id}`}></div>
+              </div>
+            ))}
+          </div>
 
-          <div className='stream__actions'>
+          <div
+            className='stream__actions'
+            style={{ display: hasJoinedStream ? 'flex' : 'none' }}
+          >
             <button id='camera-btn' className='active'>
               <svg
                 xmlns='http://www.w3.org/2000/svg'
@@ -286,7 +361,13 @@ export const Room = () => {
             </button>
           </div>
 
-          <button id='join-btn'>Join Stream</button>
+          <button
+            id='join-btn'
+            onClick={joinStream}
+            style={{ display: hasJoinedStream ? 'none' : 'block' }}
+          >
+            Join Stream
+          </button>
         </section>
 
         <section id='messages__container' ref={chatContainer}>
