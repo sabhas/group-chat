@@ -142,10 +142,6 @@ export const Room = () => {
     }
   }, [messages])
 
-  useEffect(() => {
-    console.log(members)
-  }, [members])
-
   const handleUserPublished = async (
     user: IAgoraRTCRemoteUser,
     mediaType: 'audio' | 'video'
@@ -154,8 +150,7 @@ export const Room = () => {
 
     await client.subscribe(user, mediaType)
 
-    const streamer = streamers.find((streamer) => streamer.uid === user.uid)
-    if (!streamer) addStreamer(user.uid)
+    addStreamer(user.uid)
 
     if (mediaType === 'video') {
       user.videoTrack?.play(`user-${user.uid}`)
@@ -190,7 +185,12 @@ export const Room = () => {
     const dimensions = userInDisplayFrame
       ? STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
       : STREAM_HEIGHT_WIDTH
-    setStreamers((prev) => [...prev, { uid, ...dimensions }])
+    setStreamers((prev) => {
+      const streamer = prev.find((streamer) => streamer.uid === uid)
+      if (streamer) return prev
+
+      return [...prev, { uid, ...dimensions }]
+    })
   }
 
   const addBotMessage = (message: string) => {
