@@ -41,6 +41,18 @@ const STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME = {
 
 const APP_ID = import.meta.env.VITE_API_ID
 const token = null
+let uid = sessionStorage.getItem('uid') || ''
+
+if (!uid) {
+  uid = uuidV4()
+  sessionStorage.setItem('uid', uid)
+}
+
+const rtmClient = AgoraRTM.createInstance(APP_ID)
+const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' })
+
+let localTracks: [IMicrophoneAudioTrack, ICameraVideoTrack]
+let localScreenTracks: [ILocalVideoTrack, ILocalAudioTrack]
 
 export const Room = () => {
   const navigate = useNavigate()
@@ -50,18 +62,7 @@ export const Room = () => {
   const displayName = sessionStorage.getItem('displayName') || ''
   if (!displayName) navigate('/')
 
-  let uid = sessionStorage.getItem('uid') || ''
-  if (!uid) {
-    uid = uuidV4()
-    sessionStorage.setItem('uid', uid)
-  }
-
-  const rtmClient = AgoraRTM.createInstance(APP_ID)
-  const channel = rtmClient.createChannel(roomId!)
-  const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' })
-
-  let localTracks: [IMicrophoneAudioTrack, ICameraVideoTrack]
-  let localScreenTracks: [ILocalVideoTrack, ILocalAudioTrack]
+  const channel = useRef(rtmClient.createChannel(roomId!))
 
   const chatContainer = useRef<HTMLElement>(null)
   const messagesContainer = useRef<HTMLDivElement>(null)
@@ -79,16 +80,15 @@ export const Room = () => {
   useDidMount(async () => {
     await rtmClient.login({ uid })
     await rtmClient.addOrUpdateLocalUserAttributes({ name: displayName })
-    await channel.join()
+    await channel.current.join()
+    await client.join(APP_ID, roomId!, token)
 
-    channel.on('MemberJoined', handleMemberJoined)
-    channel.on('MemberLeft', handleMemberLeft)
-    channel.on('ChannelMessage', handleChannelMessage)
+    channel.current.on('MemberJoined', handleMemberJoined)
+    channel.current.on('MemberLeft', handleMemberLeft)
+    channel.current.on('ChannelMessage', handleChannelMessage)
 
-    getMembers()
+    await getMembers()
     addBotMessage(`Welcome to the room ${displayName}! 👋`)
-
-    await client.join(APP_ID, roomId!, token, uid)
 
     client.on('user-published', handleUserPublished)
     client.on('user-left', handleUserLeft)
@@ -142,6 +142,10 @@ export const Room = () => {
     }
   }, [messages])
 
+  useEffect(() => {
+    console.log(members)
+  }, [members])
+
   const handleUserPublished = async (
     user: IAgoraRTCRemoteUser,
     mediaType: 'audio' | 'video'
@@ -150,7 +154,8 @@ export const Room = () => {
 
     await client.subscribe(user, mediaType)
 
-    addStreamer(user.uid)
+    const streamer = streamers.find((streamer) => streamer.uid === user.uid)
+    if (!streamer) addStreamer(user.uid)
 
     if (mediaType === 'video') {
       user.videoTrack?.play(`user-${user.uid}`)
@@ -199,22 +204,25 @@ export const Room = () => {
     ])
   }
 
-  const removeMember = async (memberId: string) => {
-    const member = members.find((member) => member.id === memberId)
-    setMembers((current) => current.filter((member) => member.id !== memberId))
-
-    if (member) {
-      addBotMessage(`${member.name} has left the room.`)
-    }
+  const removeMember = (memberId: string) => {
+    setMembers((current) =>
+      current.filter((member) => {
+        if (member.id === memberId) {
+          addBotMessage(`${member.name} has left the room.`)
+          return false
+        }
+        return true
+      })
+    )
   }
 
   const removeStreamer = (uid: UID) => {
-    setStreamers((prev) => prev.filter((streamer) => streamer.uid === uid))
+    setStreamers((prev) => prev.filter((streamer) => streamer.uid !== uid))
     if (userInDisplayFrame === uid) setUserInDisplayFrame('')
   }
 
   const getMembers = async () => {
-    const channelMembers = await channel.getMembers()
+    const channelMembers = await channel.current.getMembers()
     for (const member of channelMembers) {
       addMember(member)
     }
@@ -231,8 +239,8 @@ export const Room = () => {
       ])
     }
 
-    if (data.type === 'user_left') {
-      removeMember(data.uid)
+    if (data.type === 'user_left_stream') {
+      removeStreamer(data.uid)
 
       if (userInDisplayFrame === data.uid) setUserInDisplayFrame('')
     }
@@ -240,7 +248,7 @@ export const Room = () => {
 
   const sendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    channel.sendMessage({
+    channel.current.sendMessage({
       text: JSON.stringify({
         type: 'chat',
         message: message,
@@ -252,14 +260,14 @@ export const Room = () => {
   }
 
   const leaveChannel = async () => {
-    await channel.leave()
+    await channel.current.leave()
     await rtmClient.logout()
   }
 
   const joinStream = async () => {
     setHasJoinedStream(true)
 
-    const localTracks = await AgoraRTC.createMicrophoneAndCameraTracks(
+    localTracks = await AgoraRTC.createMicrophoneAndCameraTracks(
       {},
       {
         encoderConfig: {
@@ -275,15 +283,18 @@ export const Room = () => {
     await client.publish([localTracks[0], localTracks[1]])
   }
 
-  const leaveStream = async (e: any) => {
+  const leaveStream = async (
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent>
+  ) => {
     e.preventDefault()
 
     setHasJoinedStream(false)
+    removeStreamer(uid)
 
-    for (const track of localTracks) {
-      track.stop()
-      track.close()
-    }
+    localTracks[0].stop()
+    localTracks[0].close()
+    localTracks[1].stop()
+    localTracks[1].close()
 
     await client.unpublish([localTracks[0], localTracks[1]])
 
@@ -291,12 +302,10 @@ export const Room = () => {
       await client.unpublish(localScreenTracks)
     }
 
-    removeMember(uid)
-
     if (userInDisplayFrame === uid) setUserInDisplayFrame('')
 
-    channel.sendMessage({
-      text: JSON.stringify({ type: 'user_left', uid: uid })
+    channel.current.sendMessage({
+      text: JSON.stringify({ type: 'user_left_stream', uid: uid })
     })
   }
 
