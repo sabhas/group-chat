@@ -91,7 +91,7 @@ export const Room = () => {
     addBotMessage(`Welcome to the room ${displayName}! 👋`)
 
     client.on('user-published', handleUserPublished)
-    client.on('user-left', handleUserLeft)
+    client.on('user-unpublished', handleUserUnPublished)
   })
 
   useLayoutEffect(() => {
@@ -161,7 +161,7 @@ export const Room = () => {
     }
   }
 
-  const handleUserLeft = async (user: IAgoraRTCRemoteUser) => {
+  const handleUserUnPublished = async (user: IAgoraRTCRemoteUser) => {
     removeStreamer(user.uid)
   }
 
@@ -238,12 +238,6 @@ export const Room = () => {
         { author: data.displayName, message: data.message }
       ])
     }
-
-    if (data.type === 'user_left_stream') {
-      removeStreamer(data.uid)
-
-      if (userInDisplayFrame === data.uid) setUserInDisplayFrame('')
-    }
   }
 
   const sendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -303,10 +297,6 @@ export const Room = () => {
     }
 
     if (userInDisplayFrame === uid) setUserInDisplayFrame('')
-
-    channel.current.sendMessage({
-      text: JSON.stringify({ type: 'user_left_stream', uid: uid })
-    })
   }
 
   const toggleMic = async (
