@@ -10,7 +10,7 @@ import AgoraRTC, {
   UID
 } from 'agora-rtc-react'
 import { v4 as uuidV4 } from 'uuid'
-import { useDidMount } from '../../hooks/use-did-mount'
+import { useDidMount, useStateWithCallback } from '../../hooks'
 import './index.css'
 
 type Member = {
@@ -72,7 +72,7 @@ export const Room = () => {
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [hasJoinedStream, setHasJoinedStream] = useState(false)
-  const [streamers, setStreamers] = useState<Streamer[]>([])
+  const [streamers, setStreamers] = useStateWithCallback<Streamer[]>([])
   const [userInDisplayFrame, setUserInDisplayFrame] = useState<UID>('')
   const [isSharingScreen, setIsSharingScreen] = useState(false)
   const remoteUsers: { [key: UID]: IAgoraRTCRemoteUser } = {}
@@ -181,7 +181,7 @@ export const Room = () => {
     setMembers((prev) => [...prev, { id: memberId, name }])
   }
 
-  const addStreamer = (uid: UID) => {
+  const addStreamer = (uid: UID, callback?: () => void) => {
     const dimensions = userInDisplayFrame
       ? STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
       : STREAM_HEIGHT_WIDTH
@@ -190,7 +190,7 @@ export const Room = () => {
       if (streamer) return prev
 
       return [...prev, { uid, ...dimensions }]
-    })
+    }, callback)
   }
 
   const addBotMessage = (message: string) => {
@@ -271,9 +271,10 @@ export const Room = () => {
       }
     )
 
-    addStreamer(uid)
+    addStreamer(uid, () => {
+      localTracks[1].play(`user-${uid}`)
+    })
 
-    localTracks[1].play(`user-${uid}`)
     await client.publish([localTracks[0], localTracks[1]])
   }
 
