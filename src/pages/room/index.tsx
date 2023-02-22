@@ -52,6 +52,7 @@ const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' })
 
 let localTracks: [IMicrophoneAudioTrack, ICameraVideoTrack]
 let localScreenTrack: ILocalVideoTrack
+const remoteUsers: { [key: UID]: IAgoraRTCRemoteUser } = {}
 
 export const Room = () => {
   const navigate = useNavigate()
@@ -74,7 +75,6 @@ export const Room = () => {
   const [streamers, setStreamers] = useStateWithCallback<Streamer[]>([])
   const [userInDisplayFrame, setUserInDisplayFrame] = useState<UID>('')
   const [isSharingScreen, setIsSharingScreen] = useState(false)
-  const remoteUsers: { [key: UID]: IAgoraRTCRemoteUser } = {}
 
   useDidMount(async () => {
     await rtmClient.login({ uid })
