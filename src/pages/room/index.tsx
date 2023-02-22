@@ -52,7 +52,7 @@ const rtmClient = AgoraRTM.createInstance(APP_ID)
 const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' })
 
 let localTracks: [IMicrophoneAudioTrack, ICameraVideoTrack]
-let localScreenTracks: [ILocalVideoTrack, ILocalAudioTrack]
+let localScreenTrack: ILocalVideoTrack
 
 export const Room = () => {
   const navigate = useNavigate()
@@ -293,8 +293,8 @@ export const Room = () => {
 
     await client.unpublish([localTracks[0], localTracks[1]])
 
-    if (localScreenTracks) {
-      await client.unpublish(localScreenTracks)
+    if (localScreenTrack) {
+      await client.unpublish(localScreenTrack)
     }
 
     if (userInDisplayFrame === uid) setUserInDisplayFrame('')
@@ -334,20 +334,28 @@ export const Room = () => {
     let screenButton = e.currentTarget
 
     if (!isSharingScreen) {
-      setIsSharingScreen(true)
-
-      screenButton.classList.add('active')
-
       setUserInDisplayFrame(uid)
 
-      localScreenTracks = await AgoraRTC.createScreenVideoTrack({}, 'enable')
-      localScreenTracks[0].play(`user-${uid}`)
+      await AgoraRTC.createScreenVideoTrack({}, 'disable')
+        .then(async (track) => {
+          localScreenTrack = track
+          localScreenTrack.play(`user-${uid}`)
+          setIsSharingScreen(true)
+          screenButton.classList.add('active')
 
-      await client.unpublish([localTracks[1]])
-      await client.publish(localScreenTracks)
+          await client.unpublish([localTracks[1]])
+          await client.publish(localScreenTrack)
+        })
+        .catch(() => {
+          setUserInDisplayFrame('')
+        })
     } else {
+      setUserInDisplayFrame('')
       setIsSharingScreen(false)
-      await client.unpublish(localScreenTracks)
+      screenButton.classList.remove('active')
+      await client.unpublish(localScreenTrack)
+      localScreenTrack.stop()
+      localScreenTrack.close()
       localTracks[1].play(`user-${uid}`)
       await client.publish([localTracks[1]])
     }
