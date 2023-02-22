@@ -4,7 +4,6 @@ import AgoraRTM from 'agora-rtm-sdk'
 import AgoraRTC, {
   IAgoraRTCRemoteUser,
   ICameraVideoTrack,
-  ILocalAudioTrack,
   ILocalVideoTrack,
   IMicrophoneAudioTrack,
   UID
@@ -103,33 +102,6 @@ export const Room = () => {
     memberContainer.current!.style.display = 'block'
     chatContainer.current!.style.display = 'block'
   }, [])
-
-  useEffect(() => {
-    if (userInDisplayFrame) {
-      setStreamers(
-        (prev) => {
-          return prev.map((streamer) => {
-            if (streamer.uid !== userInDisplayFrame)
-              return {
-                uid: streamer.uid,
-                ...STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
-              }
-
-            return streamer
-          })
-        },
-        () => {
-          if (userInDisplayFrame === uid) {
-            localTracks[1].play(`user-${uid}`)
-          } else if (remoteUsers[userInDisplayFrame]) {
-            remoteUsers[userInDisplayFrame].videoTrack?.play(
-              `user-${userInDisplayFrame}`
-            )
-          }
-        }
-      )
-    }
-  }, [userInDisplayFrame])
 
   useLayoutEffect(() => {
     const lastMessage = document.querySelector(
@@ -327,36 +299,37 @@ export const Room = () => {
     }
   }
 
-  const toggleScreen = async (
-    e: React.MouseEvent<HTMLButtonElement, MouseEvent>
-  ) => {
-    let screenButton = e.currentTarget
+  const stopSharing = async () => {
+    setUserInDisplayFrame('')
+    setIsSharingScreen(false)
+    await client.unpublish(localScreenTrack)
+    localScreenTrack.stop()
+    localScreenTrack.close()
+    localTracks[1].play(`user-${uid}`)
+    await client.publish([localTracks[1]])
+  }
 
-    if (!isSharingScreen) {
-      setUserInDisplayFrame(uid)
-
+  const toggleScreen = async () => {
+    if (isSharingScreen) {
+      stopSharing()
+    } else {
       await AgoraRTC.createScreenVideoTrack({}, 'disable')
         .then(async (track) => {
+          track.on('track-ended', stopSharing)
+
+          setIsSharingScreen(true)
+
+          localTracks[1].stop()
+          await client.unpublish([localTracks[1]])
+
           localScreenTrack = track
           localScreenTrack.play(`user-${uid}`)
-          setIsSharingScreen(true)
-          screenButton.classList.add('active')
-
-          await client.unpublish([localTracks[1]])
+          setUserInDisplayFrame(uid)
           await client.publish(localScreenTrack)
         })
         .catch(() => {
           setUserInDisplayFrame('')
         })
-    } else {
-      setUserInDisplayFrame('')
-      setIsSharingScreen(false)
-      screenButton.classList.remove('active')
-      await client.unpublish(localScreenTrack)
-      localScreenTrack.stop()
-      localScreenTrack.close()
-      localTracks[1].play(`user-${uid}`)
-      await client.publish([localTracks[1]])
     }
   }
 
@@ -378,6 +351,30 @@ export const Room = () => {
       }
     )
     setUserInDisplayFrame('')
+  }
+
+  const showDisplayFrame = (id: UID) => {
+    setStreamers(
+      (prev) => {
+        return prev.map((streamer) => {
+          if (streamer.uid !== id)
+            return {
+              uid: streamer.uid,
+              ...STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
+            }
+
+          return streamer
+        })
+      },
+      () => {
+        if (id === uid) {
+          localTracks[1].play(`user-${uid}`)
+        } else if (remoteUsers[id]) {
+          remoteUsers[id].videoTrack?.play(`user-${id}`)
+        }
+      }
+    )
+    setUserInDisplayFrame(id)
   }
 
   return (
@@ -433,7 +430,7 @@ export const Room = () => {
                     className='video__container'
                     id={`user-container-${streamer.uid}`}
                     style={{ height: streamer.height, width: streamer.width }}
-                    onClick={() => setUserInDisplayFrame(streamer.uid)}
+                    onClick={() => showDisplayFrame(streamer.uid)}
                   >
                     <div
                       className='video-player'
@@ -473,7 +470,11 @@ export const Room = () => {
                 <path d='M12 2c1.103 0 2 .897 2 2v7c0 1.103-.897 2-2 2s-2-.897-2-2v-7c0-1.103.897-2 2-2zm0-2c-2.209 0-4 1.791-4 4v7c0 2.209 1.791 4 4 4s4-1.791 4-4v-7c0-2.209-1.791-4-4-4zm8 9v2c0 4.418-3.582 8-8 8s-8-3.582-8-8v-2h2v2c0 3.309 2.691 6 6 6s6-2.691 6-6v-2h2zm-7 13v-2h-2v2h-4v2h10v-2h-4z' />
               </svg>
             </button>
-            <button id='screen-btn' onClick={toggleScreen}>
+            <button
+              id='screen-btn'
+              className={isSharingScreen ? 'active' : ''}
+              onClick={toggleScreen}
+            >
               <svg
                 xmlns='http://www.w3.org/2000/svg'
                 width='24'
