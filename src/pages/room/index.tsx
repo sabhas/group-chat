@@ -106,29 +106,28 @@ export const Room = () => {
 
   useEffect(() => {
     if (userInDisplayFrame) {
-      setStreamers((prev) => {
-        return prev.map((streamer) => {
-          if (streamer.uid !== userInDisplayFrame)
-            return {
-              uid: streamer.uid,
-              ...STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
-            }
+      setStreamers(
+        (prev) => {
+          return prev.map((streamer) => {
+            if (streamer.uid !== userInDisplayFrame)
+              return {
+                uid: streamer.uid,
+                ...STREAM_HEIGHT_WIDTH_WHEN_USER_IN_DISPLAY_FRAME
+              }
 
-          return streamer
-        })
-      })
-    } else {
-      setStreamers((prev) => {
-        return prev.map((streamer) => {
-          if (streamer.uid !== userInDisplayFrame)
-            return {
-              uid: streamer.uid,
-              ...STREAM_HEIGHT_WIDTH
-            }
-
-          return streamer
-        })
-      })
+            return streamer
+          })
+        },
+        () => {
+          if (userInDisplayFrame === uid) {
+            localTracks[1].play(`user-${uid}`)
+          } else if (remoteUsers[userInDisplayFrame]) {
+            remoteUsers[userInDisplayFrame].videoTrack?.play(
+              `user-${userInDisplayFrame}`
+            )
+          }
+        }
+      )
     }
   }, [userInDisplayFrame])
 
@@ -361,6 +360,26 @@ export const Room = () => {
     }
   }
 
+  const hideDisplayFrame = () => {
+    setStreamers(
+      (prev) =>
+        prev.map((streamer) => ({
+          uid: streamer.uid,
+          ...STREAM_HEIGHT_WIDTH
+        })),
+      () => {
+        if (userInDisplayFrame === uid) {
+          localTracks[1].play(`user-${uid}`)
+        } else if (remoteUsers[userInDisplayFrame]) {
+          remoteUsers[userInDisplayFrame].videoTrack?.play(
+            `user-${userInDisplayFrame}`
+          )
+        }
+      }
+    )
+    setUserInDisplayFrame('')
+  }
+
   return (
     <main className='container'>
       <div id='room__container'>
@@ -387,7 +406,7 @@ export const Room = () => {
           <div
             id='stream__box'
             style={{ display: userInDisplayFrame ? 'block' : 'none' }}
-            onClick={() => setUserInDisplayFrame('')}
+            onClick={hideDisplayFrame}
           >
             {streamers.map(
               (streamer) =>
