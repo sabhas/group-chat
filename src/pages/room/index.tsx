@@ -317,6 +317,7 @@ export const Room = () => {
         .then(async (track) => {
           track.on('track-ended', stopSharing)
 
+          setUserInDisplayFrame(uid)
           setIsSharingScreen(true)
 
           localTracks[1].stop()
@@ -324,7 +325,6 @@ export const Room = () => {
 
           localScreenTrack = track
           localScreenTrack.play(`user-${uid}`)
-          setUserInDisplayFrame(uid)
           await client.publish(localScreenTrack)
         })
         .catch(() => {
