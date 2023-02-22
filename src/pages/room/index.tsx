@@ -90,7 +90,7 @@ export const Room = () => {
     addBotMessage(`Welcome to the room ${displayName}! 👋`)
 
     client.on('user-published', handleUserPublished)
-    client.on('user-unpublished', handleUserUnPublished)
+    client.on('user-left', handleLeaveStream)
   })
 
   useLayoutEffect(() => {
@@ -132,7 +132,7 @@ export const Room = () => {
     }
   }
 
-  const handleUserUnPublished = async (user: IAgoraRTCRemoteUser) => {
+  const handleLeaveStream = (user: IAgoraRTCRemoteUser) => {
     removeStreamer(user.uid)
   }
 
@@ -246,6 +246,9 @@ export const Room = () => {
       localTracks[1].play(`user-${uid}`)
     })
 
+    if (client.connectionState === 'DISCONNECTED')
+      await client.join(APP_ID, roomId!, token)
+
     await client.publish([localTracks[0], localTracks[1]])
   }
 
@@ -262,11 +265,7 @@ export const Room = () => {
     localTracks[1].stop()
     localTracks[1].close()
 
-    await client.unpublish([localTracks[0], localTracks[1]])
-
-    if (localScreenTrack) {
-      await client.unpublish(localScreenTrack)
-    }
+    await client.leave()
 
     if (userInDisplayFrame === uid) setUserInDisplayFrame('')
   }
