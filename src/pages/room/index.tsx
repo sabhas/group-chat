@@ -86,8 +86,10 @@ export const Room = () => {
     channel.current.on('MemberLeft', handleMemberLeft)
     channel.current.on('ChannelMessage', handleChannelMessage)
 
-    await getMembers()
     addBotMessage(`Welcome to the room ${displayName}! 👋`)
+
+    await getMembers()
+    getStreamers()
 
     client.on('user-published', handleUserPublished)
     client.on('user-left', handleLeaveStream)
@@ -196,6 +198,24 @@ export const Room = () => {
     const channelMembers = await channel.current.getMembers()
     for (const member of channelMembers) {
       addMember(member)
+    }
+  }
+
+  const getStreamers = () => {
+    for (const user of client.remoteUsers) {
+      addStreamer(user.uid, async () => {
+        remoteUsers[user.uid] = user
+
+        if (user.hasAudio) {
+          await client.subscribe(user, 'audio')
+          user.audioTrack?.play()
+        }
+
+        if (user.hasVideo) {
+          await client.subscribe(user, 'video')
+          user.videoTrack?.play(`user-${user.uid}`)
+        }
+      })
     }
   }
 
