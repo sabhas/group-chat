@@ -12,6 +12,9 @@ jobs:
   generate_and_push_docs:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     strategy:
       matrix:
         node-version: [lts/fermium]
